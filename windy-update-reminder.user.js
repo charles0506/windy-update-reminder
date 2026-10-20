@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.1.4
-// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，並顯示各模型更新時間（估計）
+// @version      2.2.0
+// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，顯示各模型更新時間（估計），並把 Windy 預設改成降雨圖層、Meteogram 分頁、比較模式 Clouds, Rain
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -360,6 +360,35 @@
     if (firstTime) fitTracks();
   }
 
+  // ---------- Windy 預設值 ----------
+  // 1) 地圖預設圖層：降雨（每次載入頁面時切過去；Windy 不採用我們寫進去的 startUpOverlay 設定）
+  // 2) 預報側欄預設分頁：Meteogram（點分頁，Windy 不會記住這個選擇）
+  // 3) 「比較不同預報模式」預設圖層分頁：Clouds, Rain
+  const DEFAULT_OVERLAY = 'rain';
+
+  function applyDefaultOverlay() {
+    try {
+      const st = win.W && win.W.store;
+      // 網址已經指定圖層（例如 ?temp,...）就尊重網址，不覆蓋
+      if (!st || /^\?[a-z]/i.test(location.search)) return;
+      if (st.get('overlay') !== DEFAULT_OVERLAY) st.set('overlay', DEFAULT_OVERLAY);
+    } catch (e) {}
+  }
+
+  // 每個分頁元素只自動點一次，之後使用者自己切換就不會被搶回去
+  const autoClicked = new WeakSet();
+  function autoTab(matchText) {
+    const items = [...document.querySelectorAll('.switch__item')];
+    const el = items.find((e) => matchText.test(e.textContent.trim()));
+    if (!el || autoClicked.has(el)) return;
+    autoClicked.add(el);
+    if (!el.classList.contains('selected') && !el.classList.contains('disabled')) el.click();
+  }
+  function autoDefaults() {
+    if (location.pathname.startsWith('/multimodel')) autoTab(/clouds|雲/i);
+    else if (!location.pathname.includes('/meteogram')) autoTab(/^meteogram$/i);
+  }
+
   function start() {
     if (!document.body) return requestAnimationFrame(start);
     document.body.appendChild(host);
@@ -367,6 +396,8 @@
     const wait = setInterval(() => {
       if (win.W && win.W.map && win.W.map.map && win.L) {
         clearInterval(wait);
+        applyDefaultOverlay();
+        setInterval(autoDefaults, 700);
         refresh(true);
         setInterval(() => refresh(false), REFRESH_MS);
         setInterval(render, 60000);

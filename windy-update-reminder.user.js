@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.1.2
-// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 GFS 集合平均、Google WeatherNext 2 路徑，並顯示各模型更新時間（估計）
+// @version      2.1.3
+// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，並顯示各模型更新時間（估計）
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -10,7 +10,6 @@
 // @connect      www.jma.go.jp
 // @connect      typhoon.nmc.cn
 // @connect      deepmind.google.com
-// @connect      hurricanes.ral.ucar.edu
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/charles0506/windy-update-reminder/main/windy-update-reminder.user.js
 // @downloadURL  https://raw.githubusercontent.com/charles0506/windy-update-reminder/main/windy-update-reminder.user.js
@@ -30,11 +29,10 @@
     CWA: { label: '🇹🇼 台灣 氣象署', color: '#e53935' },
     CMA: { label: '🇨🇳 中國 中央氣象台', color: '#fb8c00' },
     JMA: { label: '🇯🇵 日本 氣象廳', color: '#1e88e5' },
-    GFS: { label: '🇺🇸 GFS 集合平均', color: '#43a047' },
     GOOG: { label: '🤖 Google WeatherNext 2 集合平均', color: '#8e24aa' },
   };
   // 預設畫哪幾條（其餘在面板自己勾）
-  const DEFAULT_VISIBLE = ['CWA', 'CMA', 'JMA', 'GFS', 'GOOG'];
+  const DEFAULT_VISIBLE = ['CWA', 'CMA', 'JMA', 'GOOG'];
 
   // ---------- 網路 ----------
   function httpGet(url, headers) {
@@ -130,7 +128,7 @@
   // Google WeatherNext 2 Cyclones（網址代號 FNV3P2）：集合平均路徑 CSV，免登入。
   // 資料使用條款：https://storage.googleapis.com/weathernext-public/terms-of-use.pdf
   // （1 小時內的即時資料受條款約束，超過 1 小時為 CC BY 4.0；本腳本只在你自己的瀏覽器讀取，不轉存）
-  // 回傳 [{ trackId, init, pts }]，trackId 例如 WP292026，不分颱風全抓，之後用位置比對對上颱風。
+  // 回傳 [{ trackId, init, pts }]，不分颱風全抓，之後用位置比對對上颱風。
   async function fetchGoogle() {
     const base = 'https://deepmind.google.com/science/weatherlab/download/cyclones/FNV3P2/ensemble_mean/paired/csv/FNV3P2_';
     let run = Math.floor(Date.now() / 21600000) * 21600000;
@@ -156,44 +154,6 @@
     return Object.keys(tracks).map((trackId) => ({ trackId, init: run, pts: tracks[trackId].sort((a, b) => a.h - b.h) }));
   }
 
-  // RAL（NCAR）熱帶氣旋預報模式專案的 a-deck（ATCF 格式，各模式路徑預報）。
-  // 檔案很大（9MB），只用 HTTP Range 抓尾端 3MB，涵蓋最近一兩天的預報。
-  // 這裡沒有 ECMWF（授權限制），GFS 只有集合平均（AEMN），沒有單一定值 AVNO。
-  // （a-deck 還有 UKM、CMC、NGX 等模式，目前刻意不畫，要的話加進 AGENCIES 與 ATCF_TECH 即可）
-  const RAL_BASIN = { WP: 'northwestpacific', AL: 'atlantic', EP: 'northeastpacific', CP: 'centralpacific' };
-  const ATCF_TECH = { AEMN: 'GFS' };
-  function atcfCoord(s, pos, neg) {
-    const v = parseFloat(s) / 10;
-    return s.endsWith(neg) ? -v : v;
-  }
-  async function fetchAtcf(trackId) {
-    const basin = trackId.slice(0, 2), year = trackId.slice(4), id = trackId.toLowerCase();
-    if (!RAL_BASIN[basin]) return {};
-    const url = `https://hurricanes.ral.ucar.edu/realtime/plots/${RAL_BASIN[basin]}/${year}/${id}/a${id}.dat`;
-    const text = await httpGet(url, { Range: 'bytes=-3000000' });
-    const rows = {}; // rows[agencyKey][dtg][tau] = pt
-    text.split(/\r?\n/).slice(1).forEach((line) => { // 第一行可能被 Range 截斷
-      const f = line.split(',').map((x) => x.trim());
-      const key = ATCF_TECH[f[4]];
-      if (!key || f.length < 9) return;
-      const tau = +f[5];
-      const d = f[2];
-      const lat = atcfCoord(f[6], 'N', 'S'), lon = atcfCoord(f[7], 'E', 'W');
-      if (isNaN(lat) || isNaN(lon)) return;
-      const init = Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8), +d.slice(8, 10));
-      const byDtg = (rows[key] = rows[key] || {});
-      const byTau = (byDtg[init] = byDtg[init] || {});
-      if (!byTau[tau]) byTau[tau] = { t: init + tau * 3600000, lat, lon, kt: +f[8] || null, h: tau };
-    });
-    const out = {};
-    Object.keys(rows).forEach((key) => {
-      const latest = Math.max(...Object.keys(rows[key]).map(Number));
-      const pts = Object.values(rows[key][latest]).sort((a, b) => a.h - b.h);
-      if (pts.length > 1) out[key] = { init: latest, pts };
-    });
-    return out;
-  }
-
   // ---------- 資料狀態 ----------
   const state = {
     data: {}, // data[agency] = [{name, init, pts}]
@@ -204,7 +164,7 @@
     loadedAt: null,
   };
 
-  // 用目前位置把 Google / ATCF 的颱風對上名字（三個官方單位的現況位置當基準）
+  // 用目前位置把 Google 的颱風對上名字（三個官方單位的現況位置當基準）
   function currentPos(name) {
     for (const k of ['JMA', 'CMA', 'CWA']) {
       const s = (state.data[k] || []).find((x) => x.name === name);
@@ -229,8 +189,9 @@
     const names = new Set();
     Object.values(state.data).forEach((arr) => arr.forEach((s) => names.add(s.name)));
 
-    // 第二階段：Google + ATCF 模式路徑（需要先知道有哪些颱風、在哪）
-    ['GFS', 'GOOG'].forEach((k) => { state.data[k] = []; delete state.errors[k]; });
+    // 第二階段：Google 模式路徑（需要先知道有哪些颱風、在哪）
+    state.data.GOOG = [];
+    delete state.errors.GOOG;
     if (names.size) {
       let google = [];
       try { google = await fetchGoogle(); } catch (e) { fail('GOOG', e); }
@@ -244,12 +205,6 @@
         });
         if (!best) continue;
         state.data.GOOG.push({ name, init: best.init, pts: best.pts });
-        try {
-          const atcf = await fetchAtcf(best.trackId);
-          Object.keys(atcf).forEach((k) => state.data[k].push({ name, init: atcf[k].init, pts: atcf[k].pts }));
-        } catch (e) {
-          state.errors.GFS = e.message;
-        }
       }
     }
     state.storms = [...names];

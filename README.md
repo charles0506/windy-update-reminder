@@ -7,7 +7,7 @@
 | 🇹🇼 台灣 中央氣象署 | 紅 | cwa.gov.tw 網頁公開資料（不需 API 金鑰） |
 | 🇨🇳 中國 中央氣象台 | 橘 | typhoon.nmc.cn 公開 JSON |
 | 🇯🇵 日本 氣象廳 | 藍 | jma.go.jp bosai 公開 JSON |
-| 🤖 Google WeatherNext 2 集合平均 | 紫 | Google Weather Lab 公開 CSV（FNV3P2） |
+| 🤖 Google WN2（WeatherNext 2 集合平均） | 紫 | Google Weather Lab 公開 CSV（FNV3P2） |
 
 - 每個預報點標示預報時間（台灣時間）和最大風速（kt，節）
 - 面板可切換颱風（同時有多顆時）、勾選要顯示哪幾國、按「飛到颱風」縮放地圖

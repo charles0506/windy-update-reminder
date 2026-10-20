@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.1.3
+// @version      2.1.4
 // @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，並顯示各模型更新時間（估計）
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
@@ -29,7 +29,7 @@
     CWA: { label: '🇹🇼 台灣 氣象署', color: '#e53935' },
     CMA: { label: '🇨🇳 中國 中央氣象台', color: '#fb8c00' },
     JMA: { label: '🇯🇵 日本 氣象廳', color: '#1e88e5' },
-    GOOG: { label: '🤖 Google WeatherNext 2 集合平均', color: '#8e24aa' },
+    GOOG: { label: '🤖 Google WN2', color: '#8e24aa' },
   };
   // 預設畫哪幾條（其餘在面板自己勾）
   const DEFAULT_VISIBLE = ['CWA', 'CMA', 'JMA', 'GOOG'];
@@ -302,7 +302,7 @@
     .head { cursor:pointer; white-space:nowrap; user-select:none; }
     .sec { margin-top:8px; padding-top:6px; border-top:1px solid #3a4452; }
     .sec b { color:#9fb0c0; font-weight:600; }
-    label.ag { display:flex; align-items:center; gap:6px; cursor:pointer; margin:2px 0; }
+    label.ag { display:flex; align-items:center; gap:6px; cursor:pointer; margin:2px 0; white-space:nowrap; }
     .sw { display:inline-block; width:14px; height:4px; border-radius:2px; }
     select, button { font-size:12px; background:#2a323d; color:#e8eef5; border:1px solid #46525f; border-radius:4px; padding:1px 6px; }
     button { cursor:pointer; }

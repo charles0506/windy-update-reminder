@@ -21,7 +21,18 @@ Windy **沒有**公開「模型上次更新時間」的頁面元素或 API。
 
 執行時間以 **UTC** 顯示（例如 `08/23 06Z`），倒數則是本地時間差。
 
-## 安裝
+## 安裝方式一：userscript（可自動更新，建議）
+
+需要 Tampermonkey 或 Violentmonkey 之類的使用者腳本管理器。
+點這個網址就會跳出安裝畫面，之後有新版會自動更新：
+
+https://raw.githubusercontent.com/charles0506/windy-update-reminder/main/windy-update-reminder.user.js
+
+改程式時，要同時改 `content.js` 和 `windy-update-reminder.user.js`，並調高 `@version`，管理器才會偵測到更新。
+
+## 安裝方式二：Chrome 擴充功能（無法自動更新）
+
+Chrome 不允許從 GitHub 自動更新未上架的擴充功能，每次改版都要手動重新載入。
 
 1. 下載或 clone 這個 repo
 2. 開啟 `chrome://extensions`，右上角打開「開發人員模式」

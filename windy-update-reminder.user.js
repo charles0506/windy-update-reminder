@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.2.0
-// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，顯示各模型更新時間（估計），並把 Windy 預設改成降雨圖層、Meteogram 分頁、比較模式 Clouds, Rain
+// @version      2.3.0
+// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，顯示各模型更新時間（估計），跟上次開啟比有新預報就紅字提醒，並把 Windy 預設改成降雨圖層、Meteogram 分頁、比較模式 Clouds, Rain
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -265,8 +265,8 @@
 
   // ---------- 模型更新時間（估計） ----------
   const MODELS = [
-    { label: '🇪🇺 ECMWF', cycleHours: 6, delayHours: 6.5 },
-    { label: '🇺🇸 GFS', cycleHours: 6, delayHours: 4.5 },
+    { code: 'ECMWF', label: '🇪🇺 ECMWF', cycleHours: 6, delayHours: 6.5 },
+    { code: 'GFS', label: '🇺🇸 GFS', cycleHours: 6, delayHours: 4.5 },
   ];
   const pad2 = (n) => String(n).padStart(2, '0');
   function fmtDur(ms) {
@@ -283,12 +283,41 @@
       const run = Math.floor((nowMs - del) / cyc) * cyc;
       const d = new Date(run);
       return {
+        key: m.code,
+        runMs: run,
         label: m.label,
         run: `${pad2(d.getUTCMonth() + 1)}/${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}Z`,
         ago: fmtDur(nowMs - run),
         next: fmtDur(run + cyc + del - nowMs),
       };
     });
+  }
+
+  // ---------- 跟上次開啟比，有沒有新預報 ----------
+  // 每次載入頁面時，把各單位「目前的發布時間」存起來；下次載入頁面時，比現在的發布時間更新就標紅字。
+  // baseline = 上次載入頁面時存的值（整個頁面期間不變），所以中途有新預報也會即時變紅。
+  const SEEN_KEY = 'windyLastSeen';
+  let baseline = {};
+  try { baseline = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {}; } catch (e) {}
+
+  function currentTimes(nowMs) {
+    const m = {};
+    Object.keys(AGENCIES).forEach((k) => (state.data[k] || []).forEach((s) => { m[k + ':' + s.name] = s.init; }));
+    modelRows(nowMs).forEach((r) => { m['M:' + r.key] = r.runMs; });
+    return m;
+  }
+  const isNew = (key, cur) => baseline[key] != null && cur > baseline[key];
+  function anyNew(nowMs) {
+    const cur = currentTimes(nowMs);
+    return Object.keys(cur).some((k) => isNew(k, cur[k]));
+  }
+  function saveSeen(nowMs) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {};
+      const merged = Object.assign(saved, currentTimes(nowMs));
+      Object.keys(merged).forEach((k) => { if (nowMs - merged[k] > 30 * 86400000) delete merged[k]; }); // 清掉 30 天前的舊颱風
+      localStorage.setItem(SEEN_KEY, JSON.stringify(merged));
+    } catch (e) {}
   }
 
   // ---------- 面板 ----------
@@ -308,6 +337,7 @@
     button { cursor:pointer; }
     table { border-collapse:collapse; width:100%; } td { padding:1px 6px 1px 0; white-space:nowrap; }
     .dim { color:#8a97a5; font-size:10px; } .err { color:#ff8a80; font-size:11px; }
+    .new { color:#ff3b30; font-weight:700; }
   `;
   shadow.appendChild(style);
   const box = document.createElement('div');
@@ -320,11 +350,11 @@
   function render() {
     const nowMs = Date.now();
     if (!expanded) {
-      box.innerHTML = `<div class="head">🌀 颱風路徑${state.selected ? '：' + state.selected : ''} ▾</div>`;
+      box.innerHTML = `<div class="head">🌀 颱風路徑${state.selected ? '：' + state.selected : ''}${anyNew(nowMs) ? ' <span class="new">● 有新預報</span>' : ''} ▾</div>`;
       box.querySelector('.head').onclick = () => { expanded = true; try { localStorage.setItem('windyTyphoonExpanded', '1'); } catch (e) {} render(); };
       return;
     }
-    let html = `<div class="head">🌀 各國颱風預報路徑 ▴</div><div class="sec">`;
+    let html = `<div class="head">🌀 各國颱風預報路徑${anyNew(nowMs) ? ' <span class="new">● 有新預報</span>' : ''} ▴</div><div class="sec">`;
     if (!state.loadedAt) {
       html += '載入中…';
     } else if (!state.storms.length) {
@@ -333,14 +363,23 @@
       html += `颱風：<select id="storm">${state.storms.map((n) => `<option ${n === state.selected ? 'selected' : ''}>${n}</option>`).join('')}</select> <button id="fit">飛到颱風</button>`;
       html += Object.keys(AGENCIES).map((k) => {
         const s = (state.data[k] || []).find((x) => x.name === state.selected);
-        const info = s ? `發布 ${twTime(s.init)}` : '<span class="dim">沒有這顆颱風的資料</span>';
+        let info = '<span class="dim">沒有這顆颱風的資料</span>';
+        if (s) {
+          const key = k + ':' + s.name;
+          info = isNew(key, s.init)
+            ? `<span class="new" title="上次看到 ${twTime(baseline[key])}">發布 ${twTime(s.init)} 有新預報</span>`
+            : `發布 ${twTime(s.init)}`;
+        }
         return `<label class="ag"><input type="checkbox" data-k="${k}" ${state.visible[k] ? 'checked' : ''}><span class="sw" style="background:${AGENCIES[k].color}"></span>${AGENCIES[k].label}<span class="dim">${info}</span></label>`;
       }).join('');
       html += `<div class="dim">地圖上每個點標示預報時間（台灣時間）與最大風速（kt 節）。</div>`;
     }
     Object.keys(state.errors).forEach((k) => { html += `<div class="err">${AGENCIES[k].label} 抓取失敗：${state.errors[k]}</div>`; });
     html += `</div><div class="sec"><b>模型更新時間（估計）</b><table>` +
-      modelRows(nowMs).map((r) => `<tr><td>${r.label}</td><td>${r.run}</td><td>${r.ago}前</td><td>約${r.next}後更新</td></tr>`).join('') +
+      modelRows(nowMs).map((r) => {
+        const fresh = isNew('M:' + r.key, r.runMs);
+        return `<tr${fresh ? ' class="new"' : ''}><td>${r.label}</td><td>${r.run}</td><td>${r.ago}前</td><td>${fresh ? '有新預報' : `約${r.next}後更新`}</td></tr>`;
+      }).join('') +
       `</table><div class="dim">依各模型週期與一般延遲推算，非 Windy 官方時間。</div></div>`;
     box.innerHTML = html;
     box.querySelector('.head').onclick = () => { expanded = false; try { localStorage.setItem('windyTyphoonExpanded', '0'); } catch (e) {} render(); };
@@ -357,7 +396,10 @@
     await loadAll();
     drawTracks();
     render();
-    if (firstTime) fitTracks();
+    if (firstTime) {
+      fitTracks();
+      saveSeen(Date.now());
+    }
   }
 
   // ---------- Windy 預設值 ----------

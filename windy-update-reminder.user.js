@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.1.1
+// @version      2.1.2
 // @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 GFS 集合平均、Google WeatherNext 2 路徑，並顯示各模型更新時間（估計）
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
@@ -312,10 +312,6 @@
   const MODELS = [
     { label: '🇪🇺 ECMWF', cycleHours: 6, delayHours: 6.5 },
     { label: '🇺🇸 GFS', cycleHours: 6, delayHours: 4.5 },
-    { label: '🇺🇸 NAM', cycleHours: 6, delayHours: 3.5 },
-    { label: '🇩🇪 ICON', cycleHours: 6, delayHours: 3.75 },
-    { label: '🇯🇵 MSM', cycleHours: 3, delayHours: 2.5 },
-    { label: '🇬🇧 UKMO', cycleHours: 6, delayHours: 4.5 },
   ];
   const pad2 = (n) => String(n).padStart(2, '0');
   function fmtDur(ms) {

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.3.0
-// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，顯示各模型更新時間（估計），跟上次開啟比有新預報就紅字提醒，並把 Windy 預設改成降雨圖層、Meteogram 分頁、比較模式 Clouds, Rain
+// @version      2.4.0
+// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，顯示 ECMWF/GFS 的 Windy 官方更新時間，跟上次開啟比有新預報就紅字提醒，並把 Windy 預設改成降雨圖層、Meteogram 分頁、比較模式 Clouds, Rain
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -263,10 +263,13 @@
     if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [60, 60] });
   }
 
-  // ---------- 模型更新時間（估計） ----------
+  // ---------- 模型更新時間（Windy 官方數據） ----------
+  // 直接讀 Windy 自己每個模型的清單檔（minifest），跟「關於這些數據」視窗同一份：
+  //   ref = 參考時間（模型起報時間），update = Windy 實際收到資料的時間，interval = 更新間隔（分鐘，免費版）
+  //   下次預期更新 = update + (間隔小時數 + 1) 小時（Windy 自己的算法）
   const MODELS = [
-    { code: 'ECMWF', label: '🇪🇺 ECMWF', cycleHours: 6, delayHours: 6.5 },
-    { code: 'GFS', label: '🇺🇸 GFS', cycleHours: 6, delayHours: 4.5 },
+    { code: 'ECMWF', label: '🇪🇺 ECMWF', ident: 'ecmwf' },
+    { code: 'GFS', label: '🇺🇸 GFS', ident: 'gfs' },
   ];
   const pad2 = (n) => String(n).padStart(2, '0');
   function fmtDur(ms) {
@@ -276,19 +279,32 @@
     const m = Math.floor((ms % 3600000) / 60000);
     return h <= 0 ? `${sign}${m}分鐘` : `${sign}${h}小時${m}分鐘`;
   }
+  const modelInfo = {}; // modelInfo[code] = { ref, update, intervalH } 或 { error }
+  async function loadModels() {
+    const W = win.W;
+    await Promise.all(MODELS.map(async (m) => {
+      try {
+        const p = W.products[m.ident];
+        const mf = await p.loadMinifest();
+        modelInfo[m.code] = { ref: Date.parse(mf.ref), update: Date.parse(mf.update), intervalH: p.interval / 60 };
+      } catch (e) {
+        modelInfo[m.code] = { error: e.message };
+      }
+    }));
+  }
   function modelRows(nowMs) {
-    return MODELS.map((m) => {
-      const cyc = m.cycleHours * 3600000;
-      const del = m.delayHours * 3600000;
-      const run = Math.floor((nowMs - del) / cyc) * cyc;
-      const d = new Date(run);
+    return MODELS.filter((m) => modelInfo[m.code]).map((m) => {
+      const mi = modelInfo[m.code];
+      if (mi.error) return { key: m.code, label: m.label, error: mi.error };
+      const next = mi.update + (mi.intervalH + 1) * 3600000;
+      const nd = new Date(next);
       return {
         key: m.code,
-        runMs: run,
+        runMs: mi.update, // 用 Windy 實際收到資料的時間判斷有沒有新預報
         label: m.label,
-        run: `${pad2(d.getUTCMonth() + 1)}/${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}Z`,
-        ago: fmtDur(nowMs - run),
-        next: fmtDur(run + cyc + del - nowMs),
+        ref: `ref ${pad2(new Date(mi.ref).getUTCHours())}Z`,
+        ago: fmtDur(nowMs - mi.update),
+        next: next < nowMs ? '隨時會更新' : `${pad2(nd.getHours())}:${pad2(nd.getMinutes())}（${fmtDur(next - nowMs)}後）`,
       };
     });
   }
@@ -303,7 +319,7 @@
   function currentTimes(nowMs) {
     const m = {};
     Object.keys(AGENCIES).forEach((k) => (state.data[k] || []).forEach((s) => { m[k + ':' + s.name] = s.init; }));
-    modelRows(nowMs).forEach((r) => { m['M:' + r.key] = r.runMs; });
+    modelRows(nowMs).forEach((r) => { if (r.runMs) m['M:' + r.key] = r.runMs; });
     return m;
   }
   const isNew = (key, cur) => baseline[key] != null && cur > baseline[key];
@@ -375,12 +391,14 @@
       html += `<div class="dim">地圖上每個點標示預報時間（台灣時間）與最大風速（kt 節）。</div>`;
     }
     Object.keys(state.errors).forEach((k) => { html += `<div class="err">${AGENCIES[k].label} 抓取失敗：${state.errors[k]}</div>`; });
-    html += `</div><div class="sec"><b>模型更新時間（估計）</b><table>` +
-      modelRows(nowMs).map((r) => {
+    const rows = modelRows(nowMs);
+    html += `</div><div class="sec"><b>模型更新時間（Windy 官方數據）</b><table>` +
+      (rows.length ? rows.map((r) => {
+        if (r.error) return `<tr><td>${r.label}</td><td class="err" colspan="3">讀取失敗：${r.error}</td></tr>`;
         const fresh = isNew('M:' + r.key, r.runMs);
-        return `<tr${fresh ? ' class="new"' : ''}><td>${r.label}</td><td>${r.run}</td><td>${r.ago}前</td><td>${fresh ? '有新預報' : `約${r.next}後更新`}</td></tr>`;
-      }).join('') +
-      `</table><div class="dim">依各模型週期與一般延遲推算，非 Windy 官方時間。</div></div>`;
+        return `<tr${fresh ? ' class="new"' : ''}><td>${r.label}</td><td>${r.ref}</td><td>${r.ago}前更新</td><td>${fresh ? '有新預報！' : '下次 ' + r.next}</td></tr>`;
+      }).join('') : '<tr><td>載入中…</td></tr>') +
+      `</table><div class="dim">與 Windy「關於這些數據」視窗同一份資料；下次時間是 Windy 的預期值。</div></div>`;
     box.innerHTML = html;
     box.querySelector('.head').onclick = () => { expanded = false; try { localStorage.setItem('windyTyphoonExpanded', '0'); } catch (e) {} render(); };
     const sel = box.querySelector('#storm');
@@ -393,7 +411,7 @@
   }
 
   async function refresh(firstTime) {
-    await loadAll();
+    await Promise.all([loadAll(), loadModels()]);
     drawTracks();
     render();
     if (firstTime) {

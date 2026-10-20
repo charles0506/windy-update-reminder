@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.1.0
-// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 GFS 集合平均、Google WeatherNext 2、英/加/美海軍模式路徑，並顯示各模型更新時間（估計）
+// @version      2.1.1
+// @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 GFS 集合平均、Google WeatherNext 2 路徑，並顯示各模型更新時間（估計）
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -32,9 +32,6 @@
     JMA: { label: '🇯🇵 日本 氣象廳', color: '#1e88e5' },
     GFS: { label: '🇺🇸 GFS 集合平均', color: '#43a047' },
     GOOG: { label: '🤖 Google WeatherNext 2 集合平均', color: '#8e24aa' },
-    UKM: { label: '🇬🇧 英國 UKMO 模式', color: '#00acc1' },
-    CMC: { label: '🇨🇦 加拿大 CMC 模式', color: '#8d6e63' },
-    NGX: { label: '🇺🇸 美國海軍 NAVGEM 模式', color: '#9e9e9e' },
   };
   // 預設畫哪幾條（其餘在面板自己勾）
   const DEFAULT_VISIBLE = ['CWA', 'CMA', 'JMA', 'GFS', 'GOOG'];
@@ -162,8 +159,9 @@
   // RAL（NCAR）熱帶氣旋預報模式專案的 a-deck（ATCF 格式，各模式路徑預報）。
   // 檔案很大（9MB），只用 HTTP Range 抓尾端 3MB，涵蓋最近一兩天的預報。
   // 這裡沒有 ECMWF（授權限制），GFS 只有集合平均（AEMN），沒有單一定值 AVNO。
+  // （a-deck 還有 UKM、CMC、NGX 等模式，目前刻意不畫，要的話加進 AGENCIES 與 ATCF_TECH 即可）
   const RAL_BASIN = { WP: 'northwestpacific', AL: 'atlantic', EP: 'northeastpacific', CP: 'centralpacific' };
-  const ATCF_TECH = { AEMN: 'GFS', UKM: 'UKM', CMC: 'CMC', NGX: 'NGX' };
+  const ATCF_TECH = { AEMN: 'GFS' };
   function atcfCoord(s, pos, neg) {
     const v = parseFloat(s) / 10;
     return s.endsWith(neg) ? -v : v;
@@ -232,7 +230,7 @@
     Object.values(state.data).forEach((arr) => arr.forEach((s) => names.add(s.name)));
 
     // 第二階段：Google + ATCF 模式路徑（需要先知道有哪些颱風、在哪）
-    ['GFS', 'GOOG', 'UKM', 'CMC', 'NGX'].forEach((k) => { state.data[k] = []; delete state.errors[k]; });
+    ['GFS', 'GOOG'].forEach((k) => { state.data[k] = []; delete state.errors[k]; });
     if (names.size) {
       let google = [];
       try { google = await fetchGoogle(); } catch (e) { fail('GOOG', e); }
@@ -250,7 +248,7 @@
           const atcf = await fetchAtcf(best.trackId);
           Object.keys(atcf).forEach((k) => state.data[k].push({ name, init: atcf[k].init, pts: atcf[k].pts }));
         } catch (e) {
-          ['GFS', 'UKM', 'CMC', 'NGX'].forEach((k) => { state.errors[k] = e.message; });
+          state.errors.GFS = e.message;
         }
       }
     }

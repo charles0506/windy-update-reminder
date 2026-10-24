@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Windy 颱風各國預報路徑 + 模型更新時間
 // @namespace    https://github.com/charles0506/windy-update-reminder
-// @version      2.4.0
+// @version      2.4.1
 // @description  在 windy.com 地圖上疊加台灣氣象署、中國中央氣象台、日本氣象廳的颱風預報路徑，加上 Google WeatherNext 2 路徑，顯示 ECMWF/GFS 的 Windy 官方更新時間，跟上次開啟比有新預報就紅字提醒，並把 Windy 預設改成降雨圖層、Meteogram 分頁、比較模式 Clouds, Rain
 // @match        *://*.windy.com/*
 // @grant        GM_xmlhttpRequest
@@ -79,10 +79,17 @@
     const lstTxt = await httpGet('https://typhoon.nmc.cn/weatherservice/typhoon/jsons/list_default');
     const lst = parseJsonp(lstTxt).typhoonList;
     const out = [];
+    const errs = [];
     for (const e of lst) {
       if (e[e.length - 1] !== 'start') continue; // 只取仍在生效的
-      const vTxt = await httpGet('https://typhoon.nmc.cn/weatherservice/typhoon/jsons/view_' + e[0]);
-      const body = parseJsonp(vTxt);
+      // 每顆颱風各自處理：新颱風的資料檔剛出現時常回 403，不能拖累其他顆
+      let body;
+      try {
+        body = parseJsonp(await httpGet('https://typhoon.nmc.cn/weatherservice/typhoon/jsons/view_' + e[0]));
+      } catch (err) {
+        errs.push(err.message);
+        continue;
+      }
       const last = body.typhoon[8][body.typhoon[8].length - 1];
       const s = last[1];
       const init = Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12));
@@ -92,6 +99,7 @@
       });
       out.push({ name: String(e[1]).trim().toUpperCase(), init, pts });
     }
+    if (!out.length && errs.length) throw new Error(errs[0]); // 全部都失敗才算抓取失敗
     return out;
   }
 
@@ -352,7 +360,7 @@
     select, button { font-size:12px; background:#2a323d; color:#e8eef5; border:1px solid #46525f; border-radius:4px; padding:1px 6px; }
     button { cursor:pointer; }
     table { border-collapse:collapse; width:100%; } td { padding:1px 6px 1px 0; white-space:nowrap; }
-    .dim { color:#8a97a5; font-size:10px; } .err { color:#ff8a80; font-size:11px; }
+    .dim { color:#8a97a5; font-size:10px; } .err { color:#ff8a80; font-size:11px; word-break:break-all; }
     .new { color:#ff3b30; font-weight:700; }
   `;
   shadow.appendChild(style);
